@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kanban Task Manager</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f4f4f4;
+      margin: 0;
+      padding: 0;
+    }
+    header {
+      background: #007bff;
+      color: white;
+      padding: 1rem;
+      text-align: center;
+    }
+    .controls {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      padding: 1rem;
+    }
+    .kanban {
+      display: flex;
+      justify-content: space-around;
+      padding: 1rem;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .column {
+      background: #e0e0e0;
+      flex: 1;
+      min-width: 250px;
+      padding: 1rem;
+      border-radius: 8px;
+      min-height: 300px;
+    }
+    .column h2 {
+      text-align: center;
+    }
+    .task {
+      background: white;
+      border-radius: 6px;
+      padding: 0.5rem;
+      margin-bottom: 0.5rem;
+      cursor: move;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .task small {
+      display: block;
+      margin: 0.2rem 0;
+      font-size: 0.75rem;
+      color: #555;
+    }
+    .task.to_do { background-color: white; color: black; }
+    .task.in_progress { background-color: #4e98e6; color: #004085; }
+    .task.blocked { background-color: #e25b5b; color: #8a0900; }
+    .task.completed { background-color: #d4edda; color: #155724; }
+    .modal, .overlay {
+      position: fixed;
+      top: 0; left: 0;
+      width: 95%; height: 95%;
+      display: none;
+    }
+    .overlay {
+      background: rgba(0,0,0,0.5);
+      z-index: 1000;
+    }
+    .modal {
+      background: white;
+      max-width: 600px;
+      width: 90%;
+      padding: 1rem;
+      border-radius: 8px;
+      overflow-y: auto;
+      max-height: 80vh;
+      z-index: 1001;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+    }
+    .modal.show, .overlay.show {
+      display: block;
+    }
+    label {
+      display: block;
+      margin: 0.5rem 0 0.25rem;
+    }
+    input, select, textarea {
+      width: 95%;
+      padding: 0.5rem;
+      margin-bottom: 1rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      box-sizing: border-box;
+    }
+    button {
+      padding: 0.5rem 1rem;
+      border: none;
+      background-color: #007bff;
+      color: white;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    .task-buttons {
+      display: flex;
+      gap: 0.5rem;
+      justify-content: flex-end;
+    }
+    .column.drag-over {
+      background-color: #d0ebff;
+    }
+    .history {
+      border-top: 1px solid #ccc;
+      margin-top: 1rem;
+      padding-top: 1rem;
+      font-size: 0.85rem;
+      max-height: 150px;
+      overflow-y: auto;
+    }
+    .history-entry {
+      margin-bottom: 0.5rem;
+    }
+    /* Notes Modal textarea */
+    #notesText {
+      height: 200px;
+      font-family: monospace;
+      white-space: pre-wrap;
+      resize: vertical;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Kanban-Style Task Manager</h1>
+  </header>
+  <div class="controls">
+    <button onclick="openTaskModal()">Add New Task</button>
+    <button onclick="exportTasks()">Export Backup</button>
+    <button onclick="importJSON()">Import Backup</button>
+    <button onclick="openHelpModal()">Help</button>
+    <button onclick="openFAQModal()">Details</button>
+    <button onclick="openNotesModal()">Notes</button>
+  </div>
+  <div class="kanban">
+    <div class="column" id="to_do" ondragover="allowDrop(event)" ondrop="drop(event, 'to_do')">
+      <h2>To Do</h2>
+    </div>
+    <div class="column" id="in_progress" ondragover="allowDrop(event)" ondrop="drop(event, 'in_progress')">
+      <h2>In Progress</h2>
+    </div>
+    <div class="column" id="blocked" ondragover="allowDrop(event)" ondrop="drop(event, 'blocked')">
+      <h2>Blocked</h2>
+    </div>
+    <div class="column" id="completed" ondragover="allowDrop(event)" ondrop="drop(event, 'completed')">
+      <h2>Completed</h2>
+    </div>
+  </div>
+
+  <!-- Overlay for modals -->
+  <div class="overlay" onclick="closeModals()"></div>
+
+  <!-- Task Modal -->
+  <div class="modal" id="taskModal">
+    <h2 id="modalTitle">New Task</h2>
+    <form id="taskForm">
+      <label for="taskTitle">Title</label>
+      <input type="text" id="taskTitle" required />
+      <label for="taskStatus">Status</label>
+      <select id="taskStatus">
+        <option value="to_do">To Do</option>
+        <option value="in_progress">In Progress</option>
+        <option value="blocked">Blocked</option>
+        <option value="completed">Completed</option>
+      </select>
+      <label for="taskCategory">Category</label>
+      <select id="taskCategory">
+        <option>Data Analysis</option>
+        <option>Reporting</option>
+        <option>Domain Planning</option>
+        <option>Urgent</option>
+        <option>Priority</option>
+        <option>Cancelled</option>
+      </select>
+      <label for="taskDue">Due Date</label>
+      <input type="date" id="taskDue" />
+      <label for="taskComments">Comments</label>
+      <input type="text" id="taskComments" />
+      <label for="taskDescription">Description</label>
+      <textarea id="taskDescription"></textarea>
+
+      <div class="task-buttons">
+        <button type="submit">Save</button>
+        <button type="button" id="deleteButton" onclick="deleteTask()">Delete</button>
+        <button type="button" onclick="closeModals()">Cancel</button>
+      </div>
+
+      <div class="history" id="statusHistory"></div>
+    </form>
+  </div>
+
+  <!-- Help Modal -->
+  <div class="modal" id="helpModal">
+    <h2>Help</h2>
+    <p><strong>Adding Tasks</strong></p>
+    <p>Add new tasks by clicking "Add New Task" and enter the relevant details in the sections. When you are done, click "Save".</p>
+    <br>
+    <p><strong>Editing Tasks</strong></p>
+    <p>You can edit a task by clicking on it in the board and changing any details you want. When you are finished, click "Save.</p>
+    <br>
+    <p><strong>Deleting Tasks</strong></p>
+    <p>Tasks can be deleted by clicking on a task and then clicking "Delete".</p>
+    <button onclick="closeModals()">Close</button>
+  </div>
+
+  <!-- FAQ Modal -->
+  <div class="modal" id="FAQModal">
+    <h2>Details</h2>
+    <p>
+      This Kanban board supports task creation, editing, status changes by dragging,
+      history tracking of status changes, and notes management.
+    </p>
+    <p>This application uses an unreliable persistent state by storing data in LocalStorage of your internet browser.
+      If you delete your cookies, cache, or history you will lose your data. To prevent this, you can back up and export
+      your tasks to a JSON file.
+    </p>
+    <p>Saving Your Tasks</p>
+    <p>To export your tasks, click 'Export Backup' to save all tasks and notes to a JSON file.</p>
+    <p>Restoring Your Tasks</p>
+    <p>To restore your tasks, click 'Import Backup' and the application will import the tasks from the selected JSON file. 
+      Doing this will overwrite your existing tasks.
+    </p>
+    <p></p>
+    
+    <button onclick="closeModals()">Close</button>
+  </div>
+
+  <!-- Notes Modal -->
+  <div class="modal" id="notesModal">
+    <h2>Notes</h2>
+    <textarea id="notesText" placeholder="Enter your notes here..."></textarea>
+    <div style="text-align: right;">
+      <button onclick="saveNotes()">Save</button>
+      <button onclick="closeModals()">Close</button>
+    </div>
+  </div>
+
+  <!-- Hidden file input for import -->
+  <input type="file" id="fileInput" style="display:none" accept=".json" />
+
+  <script>
+    // Global task and notes data loaded from localStorage
+    let tasks = JSON.parse(localStorage.getItem("tasks")) || [];
+    let notes = localStorage.getItem("notes") || "";
+
+    // Currently editing task id
+    let currentEditId = null;
+
+    // DOM elements
+    const taskModal = document.getElementById("taskModal");
+    const helpModal = document.getElementById("helpModal");
+    const FAQModal = document.getElementById("FAQModal");
+    const notesModal = document.getElementById("notesModal");
+    const overlay = document.querySelector(".overlay");
+
+    const taskForm = document.getElementById("taskForm");
+    const taskTitle = document.getElementById("taskTitle");
+    const taskStatus = document.getElementById("taskStatus");
+    const taskCategory = document.getElementById("taskCategory");
+    const taskDue = document.getElementById("taskDue");
+    const taskComments = document.getElementById("taskComments");
+    const taskDescription = document.getElementById("taskDescription");
+    const statusHistory = document.getElementById("statusHistory");
+    const deleteButton = document.getElementById("deleteButton");
+    const notesText = document.getElementById("notesText");
+    const modalTitle = document.getElementById("modalTitle");
+
+    // Render tasks on page load
+    renderTasks();
+
+    // === Functions ===
+
+    // Open Task Modal for new or editing
+    function openTaskModal(task = null) {
+      resetTaskForm();
+      if (task) {
+        // Edit mode
+        currentEditId = task.id;
+        modalTitle.textContent = "Edit Task";
+        taskTitle.value = task.title;
+        taskStatus.value = task.status;
+        taskCategory.value = task.category;
+        taskDue.value = task.due || "";
+        taskComments.value = task.comments || "";
+        taskDescription.value = task.description || "";
+        populateHistory(task.history);
+        deleteButton.style.display = "inline-block";
+      } else {
+        // New task mode
+        currentEditId = null;
+        modalTitle.textContent = "New Task";
+        deleteButton.style.display = "none";
+      }
+      showModal(taskModal);
+    }
+
+    // Populate status history display in the form
+    function populateHistory(history = []) {
+      if (!history.length) {
+        statusHistory.innerHTML = "<em>No status changes yet.</em>";
+        return;
+      }
+      statusHistory.innerHTML = "<strong>Status History:</strong>";
+      history.forEach(entry => {
+        let date = new Date(entry.date).toLocaleString();
+        statusHistory.innerHTML += `<div class="history-entry">${date}: ${entry.status}</div>`;
+      });
+    }
+
+    // Reset Task Form to defaults
+    function resetTaskForm() {
+      taskForm.reset();
+      statusHistory.innerHTML = "";
+    }
+
+    // Show a modal with overlay
+    function showModal(modal) {
+      modal.classList.add("show");
+      overlay.classList.add("show");
+    }
+
+    // Close all modals and overlay
+    function closeModals() {
+      [taskModal, helpModal, FAQModal, notesModal].forEach(modal => {
+        modal.classList.remove("show");
+      });
+      overlay.classList.remove("show");
+    }
+
+    // Save or update a task
+    taskForm.addEventListener("submit", e => {
+      e.preventDefault();
+      let title = taskTitle.value.trim();
+      if (!title) {
+        alert("Title is required.");
+        return;
+      }
+      let newTask = {
+        id: currentEditId || Date.now().toString(),
+        title: title,
+        status: taskStatus.value,
+        category: taskCategory.value,
+        due: taskDue.value,
+        comments: taskComments.value,
+        description: taskDescription.value,
+        history: []
+      };
+
+      if (currentEditId) {
+        // Update existing task
+        const index = tasks.findIndex(t => t.id === currentEditId);
+        if (index > -1) {
+          // Preserve history and add new status change if different
+          newTask.history = tasks[index].history || [];
+          if (tasks[index].status !== newTask.status) {
+            newTask.history.push({ status: newTask.status, date: new Date().toISOString() });
+          }
+          tasks[index] = newTask;
+        }
+      } else {
+        // New task, initialize history with current status
+        newTask.history.push({ status: newTask.status, date: new Date().toISOString() });
+        tasks.push(newTask);
+      }
+      saveTasks();
+      renderTasks();
+      closeModals();
+    });
+
+    // Delete current editing task
+    function deleteTask() {
+      if (!currentEditId) return;
+      if (!confirm("Are you sure you want to delete this task?")) return;
+      tasks = tasks.filter(t => t.id !== currentEditId);
+      saveTasks();
+      renderTasks();
+      closeModals();
+    }
+
+    // Render tasks to their columns
+    function renderTasks() {
+      // Clear all columns
+      ["to_do", "in_progress", "blocked", "completed"].forEach(status => {
+        const col = document.getElementById(status);
+        col.querySelectorAll(".task").forEach(t => t.remove());
+      });
+
+      // Create and append task elements
+      tasks.forEach(task => {
+        const taskEl = document.createElement("div");
+        taskEl.className = "task " + task.status;
+        taskEl.draggable = true;
+        taskEl.id = task.id;
+        taskEl.innerHTML = `
+          <strong>${escapeHtml(task.title)}</strong>
+          <small>Category: ${escapeHtml(task.category)}</small>
+          <small>Due: ${task.due || "N/A"}</small>
+          <small>Comments: ${escapeHtml(task.comments || "")}</small>
+          <small>${escapeHtml(task.description || "")}</small>
+        `;
+        // Drag events
+        taskEl.addEventListener("dragstart", drag);
+        // Open edit modal on click
+        taskEl.addEventListener("click", () => openTaskModal(task));
+        // Append to correct column
+        document.getElementById(task.status).appendChild(taskEl);
+      });
+    }
+
+    // Drag & Drop handlers
+    function drag(ev) {
+      ev.dataTransfer.setData("text/plain", ev.target.id);
+    }
+
+    function allowDrop(ev) {
+      ev.preventDefault();
+      ev.currentTarget.classList.add("drag-over");
+    }
+
+    function drop(ev, status) {
+      ev.preventDefault();
+      ev.currentTarget.classList.remove("drag-over");
+      const id = ev.dataTransfer.getData("text/plain");
+      const task = tasks.find(t => t.id === id);
+      if (task) {
+        if (task.status !== status) {
+          // Add to history
+          task.history = task.history || [];
+          task.history.push({ status: status, date: new Date().toISOString() });
+          task.status = status;
+          saveTasks();
+          renderTasks();
+        }
+      }
+    }
+
+    // Remove drag-over class when leaving column
+    ["to_do", "in_progress", "blocked", "completed"].forEach(id => {
+      const col = document.getElementById(id);
+      col.addEventListener("dragleave", e => e.currentTarget.classList.remove("drag-over"));
+    });
+
+    // Save tasks to localStorage
+    function saveTasks() {
+      localStorage.setItem("tasks", JSON.stringify(tasks));
+    }
+
+    // Export tasks and notes to JSON file
+    function exportTasks() {
+      const data = {
+        tasks: tasks,
+        notes: notes
+      };
+      const dataStr = JSON.stringify(data, null, 2);
+      const blob = new Blob([dataStr], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "kanban_backup.json";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    // Import backup from JSON file
+    function importJSON() {
+      const fileInput = document.getElementById("fileInput");
+      fileInput.value = null; // Reset so same file can be selected again
+      fileInput.onchange = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          try {
+            const data = JSON.parse(event.target.result);
+            if (data.tasks && Array.isArray(data.tasks)) {
+              tasks = data.tasks;
+            } else {
+              alert("Invalid backup: 'tasks' array missing.");
+              return;
+            }
+            if (data.notes && typeof data.notes === "string") {
+              notes = data.notes;
+            }
+            saveTasks();
+            saveNotes();
+            renderTasks();
+            alert("Backup imported successfully.");
+          } catch (err) {
+            alert("Error importing backup: " + err.message);
+          }
+        };
+        reader.readAsText(file);
+      };
+      fileInput.click();
+    }
+
+    // Open Help Modal
+    function openHelpModal() {
+      showModal(helpModal);
+    }
+
+    // Open FAQ Modal
+    function openFAQModal() {
+      showModal(FAQModal);
+    }
+
+    // Open Notes Modal
+    function openNotesModal() {
+      notesText.value = notes;
+      showModal(notesModal);
+    }
+
+    // Save notes to localStorage
+    function saveNotes() {
+      notes = notesText.value;
+      localStorage.setItem("notes", notes);
+      alert("Notes saved.");
+      closeModals();
+    }
+
+    // Escape HTML for safe display
+    function escapeHtml(text) {
+      if (!text) return "";
+      return text.replace(/&/g, "&amp;")
+                 .replace(/</g, "&lt;")
+                 .replace(/>/g, "&gt;")
+                 .replace(/"/g, "&quot;")
+                 .replace(/'/g, "&#039;");
+    }
+  </script>
+</body>
+</html>
